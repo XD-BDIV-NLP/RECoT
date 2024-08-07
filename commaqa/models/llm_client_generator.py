@@ -53,9 +53,10 @@ def non_cached_llm_call(  # kwargs doesn't work with caching.
         port = os.environ[model_name.replace("-", "_") + "_LLM_SERVER_PORT" + llm_server_key_suffix]
 
     response = requests.get(host + ":" + str(port) + "/generate", params=params)
-
+    print(response)
+    print(response.status_code)
     if response.status_code != 200:
-        raise Exception("LLM Generation request failed!")
+        raise Exception("LLM Generation request failed1111!")
 
     result = response.json()
 
@@ -67,7 +68,7 @@ def non_cached_llm_call(  # kwargs doesn't work with caching.
     return result
 
 
-@cache.memoize()
+#@cache.memoize()
 def cached_llm_call(  # kwargs doesn't work with caching.
     prompt,
     model_name,
@@ -152,7 +153,7 @@ class LLMClientGenerator:
         num_return_sequences=1,
         repetition_penalty=None,
         length_penalty=None,
-        model_tokens_limit=2000,
+        model_tokens_limit=1000,
         remove_method="first",
     ):
 

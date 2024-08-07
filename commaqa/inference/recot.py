@@ -1,3 +1,4 @@
+import os
 import re
 import copy
 import json
@@ -5,7 +6,7 @@ import time
 from typing import List
 from functools import lru_cache
 import random
-
+import json
 import requests
 from rapidfuzz import fuzz
 
@@ -257,7 +258,7 @@ class RetrieveAndResetParagraphsParticipant(ParticipantModel):
         retriever_host=None,
         retriever_port=None,
         retrieval_count=None,
-        query_source="last_answer",
+        query_source="last_answer",  #可修改
         cumulate_titles=False,
         document_type="title",
         source_corpus_name=None,
@@ -337,19 +338,32 @@ class RetrieveAndResetParagraphsParticipant(ParticipantModel):
         return {"paragraph_retrieve_and_reset": self.num_calls}
 
     def query(self, state, debug=False):
+        oriquestion=""
 
         if self.query_source == "original_question":
             input_query = state.data["question"]
+            oriquestion=input_query
+            ##print("检索：")
+            #print(oriquestion,'\n')
 
         elif self.query_source == "last_answer":
             input_query = state.data.get_last_answer()
 
-        elif self.query_source == "question_or_last_generated_sentence":
+        elif self.query_source == "question_or_last_generated_sentence":  #改进之处
             # add question to query only if generated sentences are empty. O/w use last_generated_sentence.
             question = state.data["question"]
             generated_sentences = state.data.get("generated_sentences", [])
             generated_sentences = remove_reasoning_sentences(generated_sentences)
             last_generated_sentence_str = generated_sentences[-1].strip() if generated_sentences else ""
+            #检索最后的句子处
+            #with open('/home/miao/ircot/commaqa/inference/dev_ans1.json') as f:
+            #    json_data = json.load(f)
+            
+                    
+            #input_query = json_data[question].lower()+" "+last_generated_sentence_str if last_generated_sentence_str else question
+            #print("检索问题：")
+            #print(input_query,'\n')
+            
             input_query = last_generated_sentence_str if last_generated_sentence_str else question
 
         else:
@@ -495,6 +509,9 @@ class RetrieveAndResetParagraphsParticipant(ParticipantModel):
                         selected_paras.append(retrieval_item["paragraph_text"])
 
                 else:
+                    print(f"url is {url}")
+                    print(f"params is {params}")
+                    print(f"result is {result}")
                     self.retrieval_failures_so_far += 1
                     if self.retrieval_failures_so_far > self.retrieval_failures_max:
                         raise Exception(
@@ -730,6 +747,7 @@ class StepByStepCOTGenParticipant(ParticipantModel):
         disable_exit=False,
         max_para_num_words=350,
         question_prefix="",
+        init_question="",
         gen_model="gpt3",
         next_model=None,
         end_state="[EOQ]",
@@ -780,6 +798,7 @@ class StepByStepCOTGenParticipant(ParticipantModel):
         self.shuffle_paras = shuffle_paras
         self.disable_exit = disable_exit
         self.question_prefix = question_prefix
+        self.init_question=init_question
 
         # Run 'python -m spacy download en_core_web_sm' if not downloaded already.
         self.spacy_object = spacy.load("en_core_web_sm")
@@ -826,7 +845,9 @@ class StepByStepCOTGenParticipant(ParticipantModel):
                 [para_to_text(title, para, self.max_para_num_words) for title, para in zipped_titles_paras]
             )
             generation_so_far = " ".join(state.data[f"generated_{self.generation_type}"])
-
+            if True:
+                self.init_question=question
+                print("初始问题记录",self.init_question)
             if self.question_prefix:
                 assert self.question_prefix.endswith("\n") or self.question_prefix.endswith(" ")
                 question = self.question_prefix + question
@@ -837,21 +858,75 @@ class StepByStepCOTGenParticipant(ParticipantModel):
                 test_example_str = f"Q: {question}" + "\n" + f"A: {generation_so_far}"
 
             prompt = "\n\n\n".join([self.prompt, test_example_str]).strip()
-
+            # print("prompt",prompt)
             output_text_scores = self.generator.generate_text_sequence(prompt)
             if len(output_text_scores) > 1:
                 print("Can not handle more than one answer for this model yet" + "\n" + str(output_text_scores))
 
             new_generation = output_text_scores[0][0].strip()
+
+            with open('/data/ircot/commaqa/inference/dev_ans.json') as f:
+                json_data = json.load(f)
+            
             new_sents = list(self.spacy_object(new_generation).sents)
             if new_sents:
-                new_generation = new_sents[0].text
+                #改进后1
+                if json_data[self.init_question] != "SEP": #not found_answer
+                   scores = {}
+                   sent_list = []
+                   for sent in new_sents:
+                       print("找到的三元组:",json_data[self.init_question])
+                       print("\n\n")
+                       sent_list.append(sent.text.lower())
+                       match_score = fuzz.token_sort_ratio(sent.text.lower(), json_data[self.init_question].lower())
+                       scores[sent.text] = match_score
+                   if scores:
+                       best_match_sent = max(scores, key=scores.get)
+                       best_match_score = scores[best_match_sent]
+                       print("最匹配的句子:", best_match_sent)
+                       if len(new_sents) > 1:
+                           sent_index = sent_list.index(best_match_sent.lower())
+                           os.system(f"echo {sent_index} >> /data/ircot/commaqa/inference/sent_ratio")
+                           print("write")
+                       #print("得分:", best_match_score)
+                       new_generation = best_match_sent
+                       # print("三元组",new_generation)
+                else:
+                    print("没找到\n\n")
+                    new_generation = new_sents[0].text #如果有分句，将新生成的文本设置为第一句的文本，然后将其追加到系统状态的生成列表中
+
+                #改进后2：舍弃
+                # if len(new_sents) > 1:
+                #     scores = {}
+                #     for i in range(len(new_sents)-1):
+                #         sent=new_sents[i]
+                #         # print("找到的三元组:",json_data[self.init_question])
+                #         match_score = fuzz.token_sort_ratio(sent.text.lower(), json_data[self.init_question].lower())
+                #         scores[sent.text] = match_score
+
+                #     if scores:
+                #         best_match_sent = max(scores, key=scores.get)
+                #         best_match_score = scores[best_match_sent]
+                #         # print("最匹配的句子:", best_match_sent)
+                #         # print("得分:", best_match_score)
+                #         new_generation = best_match_sent
+                #         # print("三元组",new_generation)
+
+                # 原始代码  
+                #new_generation = new_sents[0].text #如果有分句，将新生成的文本设置为第一句的文本，然后将其追加到系统状态的生成列表中
+                #print(f"this is before improvement")
+
+                print("new_sents::::",new_sents)
+                print("new_generation:::::",new_generation)
+               
                 new_state.data[f"generated_{self.generation_type}"].append(new_generation)
 
                 if self.answer_extractor_regex.match(new_generation):
                     return_answer = self.answer_extractor_regex.match(new_generation).group(1)
                     if self.answer_extractor_remove_last_fullstop and return_answer.endswith("."):
                         return_answer = return_answer[:-1]
+                        print("-------return_answer",return_answer)
+                        
                     exit_generation = True
 
             else:
@@ -956,6 +1031,7 @@ class StepByStepExitControllerParticipant(ParticipantModel):
 
         if len(state.data[self.generation_key]) >= self.max_num_sentences:
             exit_generation = True
+            print("-------数量控制")
 
         # backup if regex doesn't match but we need to exit.
         if self.generation_key in ("generated_sub_answers", "generated_sub_questions"):
@@ -967,6 +1043,13 @@ class StepByStepExitControllerParticipant(ParticipantModel):
             return_answer = self.answer_extractor_regex.match(generated_sentences[-1]).group(1)
             if self.answer_extractor_remove_last_fullstop and return_answer.endswith("."):
                 return_answer = return_answer[:-1]
+                # data = {
+                # "控制return_answer": [str(span) for span in return_answer]
+                # }
+                # # 打开文件并将数据写入JSON文件中
+                # with open("output.json", "w") as json_file:
+                #     json.dump(data, json_file)
+                print("控制return_answer----控制",return_answer)
             exit_generation = True
 
         if exit_generation:

@@ -12,15 +12,16 @@ from commaqa.inference.prompt_reader import fit_prompt_into_given_limit
 
 logger = logging.getLogger(__name__)
 
-openai.api_base = "https://api.chatanywhere.tech"
-openai.api_key ='sk-LTQbgmqXmKGwp9ZIgcZBkZkdxfXYCyFeBNWSGmZsqUgmKI6A'
+
 cache = Cache(os.path.expanduser("~/.cache/gpt3calls"))
+openai.api_key ='sk-LTQbgmqXmKGwp9ZIgcZBkZkdxfXYCyFeBNWSGmZsqUgmKI6A'
+url = "https://api.chatanywhere.com.cn/v1/completions"
 
 
-@cache.memoize()
+# @cache.memoize()
 def cached_openai_call(  # kwargs doesn't work with caching.
     prompt,
-    engine,
+    model,
     temperature,
     max_tokens,
     top_p,
@@ -30,10 +31,11 @@ def cached_openai_call(  # kwargs doesn't work with caching.
     n,
     best_of,
     logprobs,
+    stream
 ):
     return openai.Completion.create(
         prompt=prompt,
-        engine=engine,
+        model=model,
         temperature=temperature,
         max_tokens=max_tokens,
         top_p=top_p,
@@ -43,12 +45,13 @@ def cached_openai_call(  # kwargs doesn't work with caching.
         n=n,
         best_of=best_of,
         logprobs=logprobs,
+        stream=stream
     )
 
 
 def openai_call(
     prompt,
-    engine,
+    model,
     temperature,
     max_tokens,
     top_p,
@@ -58,11 +61,12 @@ def openai_call(
     n,
     best_of,
     logprobs,
+    stream
 ):
     function = cached_openai_call if temperature == 0 else openai.Completion.create
     return function(
         prompt=prompt,
-        engine=engine,
+        model=model,
         temperature=temperature,
         max_tokens=max_tokens,
         top_p=top_p,
@@ -72,6 +76,7 @@ def openai_call(
         n=n,
         best_of=best_of,
         logprobs=logprobs,
+        stream=stream
     )
 
 
@@ -85,18 +90,20 @@ def get_gpt_tokenizer():
 class GPT3Generator:
     def __init__(
         self,
+        # engine="text-davinci-002",
         engine="gpt-3.5-turbo-instruct",
-        temperature=0,
+        temperature=0.8,
         max_tokens=300,
         top_p=1,
         frequency_penalty=0,
         presence_penalty=0,
         stop=["\n"],
         retry_after_n_seconds=None,
-        n=1,
-        best_of=1,
+        n=2,
+        best_of=2,
         logprobs=0,
         remove_method="first",
+        stream=False
     ):
         self.engine = engine
         self.logprobs = logprobs
@@ -110,25 +117,22 @@ class GPT3Generator:
         self.temperature = temperature
         self.retry_after_n_seconds = retry_after_n_seconds
         self.remove_method = remove_method
+        self.stream = stream
 
         # if "code-davinci" not in engine:
         #     raise Exception("Not allowed to prevent accidental $$ wastage.")
-
+        #
         # if "code-davinci" not in engine and self.retry_after_n_seconds is not None:
         #     raise Exception(
         #         "Retry is only supported for code-davinci as it's free. "
         #         "Using it for other paid models is risky and so is disabled."
         #     )
 
-        # if "code-davinci" in engine:
-        #     self.model_tokens_limit = 8000
-        # else:
-        #     self.model_tokens_limit = 2000
-        self.model_tokens_limit =2000
-        # if ("davinci" or "gpt-3.5") in engine:
-        #     self.model_tokens_limit = 8000
-        # else:
-        #     self.model_tokens_limit = 2000
+        if ("davinci" or "gpt-3.5") in engine:
+            self.model_tokens_limit = 8000
+        else:
+            self.model_tokens_limit = 2000
+
     def generate_text_sequence(self, prompt):
         """
         :param input_text:
@@ -149,33 +153,41 @@ class GPT3Generator:
         )
 
         arguments = {
-            "engine": self.engine,
+            "model": self.engine,
             "prompt": prompt,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "top_p": self.top_p,
-            "n": self.n,
-            "best_of": self.best_of,
+            # "n": self.n,
+            # "best_of": self.best_of,
+            "n": 4,
+            "best_of": 4,
             "logprobs": self.logprobs,
             "frequency_penalty": self.frequency_penalty,
             "presence_penalty": self.presence_penalty,
             "stop": self.stop,
+            "stream": self.stream
         }
         if self.best_of is not None:
-            arguments["best_of"] = self.best_of
-            # arguments["best_of"] = 4
-        
-        # payload = json.dumps(arguments)
-        # headers = {
-        #     'Authorization': 'Bearer sk-GQFIDgoyWaLpMKyMrV3NNUOgzZ7X8BWof7NrF4HS8QLDpoq0',
-        #     'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
-        #     'Content-Type': 'application/json'
-        # }
+            # arguments["best_of"] = self.best_of
+            arguments["best_of"] = 4
+
+        # print("***" * 20)
+        # print("arguments is " + str(arguments))
+        # print("***" * 20)
+
+        payload = json.dumps(arguments)
+        headers = {
+            'Authorization': 'Bearer sk-GQFIDgoyWaLpMKyMrV3NNUOgzZ7X8BWof7NrF4HS8QLDpoq0',
+            'User-Agent': 'Apifox/1.0.0 (https://apifox.com)',
+            'Content-Type': 'application/json'
+        }
+
         success = False
         for index in range(500):
             try:
-                response = openai_call(**arguments)
-                # response = json.loads(requests.request("POST", url, headers=headers, data=payload).text)
+                # response = openai_call(**arguments)
+                response = json.loads(requests.request("POST", url, headers=headers, data=payload).text)
                 success = True
                 break
             except Exception as exception:
@@ -213,6 +225,12 @@ class GPT3Generator:
             raise Exception("Could not complete OpenAI call")
 
         output_seq_score = []
+
+        print()
+        print("***" * 20)
+        print("response is" + str(response))
+        print("***" * 20)
+
 
         for index, choice in enumerate(response["choices"]):
             if "logprobs" in choice and "token_logprobs" in choice["logprobs"]:

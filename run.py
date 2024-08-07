@@ -245,11 +245,11 @@ instantiation_schemes = {
         "bm25_retrieval_count": ["5", "7", "9", "11", "13", "15"],
         "distractor_count": ['"1"', '"2"', '"3"'],
     },
-    "ircot": {
+    "recot": {
         "bm25_retrieval_count": ["2", "4", "6", "8"],
         "distractor_count": ['"1"', '"2"', '"3"'],
     },
-    "ircot_qa": {
+    "recot_qa": {
         "bm25_retrieval_count": ["2", "4", "6", "8"],
         "distractor_count": ['"1"', '"2"', '"3"'],
     },
@@ -744,7 +744,7 @@ def main():
                 hyperparameter_metrics_datum = {key: value for key, value in variable_replacements.items()}
                 if "para_recall" in metrics and "avg_predicted_paras" in metrics:
                     metric_value = "@".join(
-                        [str(round(metrics["title_recall"] * 100, 1)), str(round(metrics["avg_predicted_titles"], 1))]
+                        [str(round(metrics["title_recall"] * 100, 1)), str(round(metrics["avg_predicted_titles"],1))]
                     )
                     metric_value += " | "
                     metric_value += "@".join(
@@ -874,11 +874,11 @@ def main():
                 metrics = json.load(file)
             if "para_recall" in metrics and "avg_predicted_paras" in metrics:
                 metric_value = "@".join(
-                    [str(round(metrics["title_recall"] * 100, 1)), str(round(metrics["avg_predicted_titles"], 1))]
+                    [str(round(metrics["title_recall"] * 100, 1)), str(round(metrics["avg_predicted_titles"],1))]
                 )
                 metric_value += " | "
                 metric_value += "@".join(
-                    [str(round(metrics["para_recall"] * 100, 1)), str(round(metrics["avg_predicted_paras"], 1))]
+                    [str(round(metrics["para_recall"] * 100, 1)), str(round(metrics["avg_predicted_paras"],1))]
                 )
             else:
                 metric_value = " | ".join(
